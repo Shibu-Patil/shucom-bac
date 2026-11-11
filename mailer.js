@@ -3,141 +3,98 @@ import nodemailer from 'nodemailer'
 import { renderEnquiry } from './templates.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
-const trim = (value) => String(value ?? '').trim()
-const toList = (value) =>
-  trim(value)
+const list = (value) =>
+  String(value ?? '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
 
-const resendKey = trim(process.env.RESEND_API_KEY)
-const smtpHost = trim(process.env.SMTP_HOST)
-const smtpUser = trim(process.env.SMTP_USER)
-const smtpPass = trim(process.env.SMTP_PASS)
-const smtpPort = Number(process.env.SMTP_PORT) || 465
-const smtpSecure =
-  process.env.SMTP_SECURE !== undefined
-    ? process.env.SMTP_SECURE === 'true'
-    : smtpPort === 465
-
-const dryRun = process.env.MAIL_DRY_RUN === 'true'
-
-const mailTo = toList(process.env.MAIL_TO).filter((address) =>
+const mailTo = list(process.env.MAIL_TO).filter((address) =>
   EMAIL_RE.test(address),
 )
-const rejectedRecipients = toList(process.env.MAIL_TO).filter(
-  (address) => !EMAIL_RE.test(address),
-)
+const mailFrom =
+  (process.env.MAIL_FROM ?? '').trim() ||
+  'Subhashree Website <onboarding@resend.dev>'
 
-// FormSubmit needs a single destination inbox; fall back to the first MAIL_TO.
-const formsubmitTarget = trim(process.env.FORMSUBMIT_TO) || mailTo[0] || ''
+const resendKey = (process.env.RESEND_API_KEY ?? '').trim()
+const smtpHost = (process.env.SMTP_HOST ?? '').trim()
+const smtpUser = (process.env.SMTP_USER ?? '').trim()
+const smtpPass = (process.env.SMTP_PASS ?? '').trim()
+const smtpPort = Number(process.env.SMTP_PORT) || 465
+const formsubmitTo =
+  (process.env.FORMSUBMIT_TO ?? '').trim() || mailTo[0] || ''
 
-const provider = dryRun
-  ? 'dry-run'
-  : resendKey
-    ? 'resend'
-    : smtpHost && smtpUser && smtpPass
-      ? 'smtp'
-      : formsubmitTarget && EMAIL_RE.test(formsubmitTarget)
-        ? 'formsubmit'
-        : 'none'
+// Resend if we have a key, else SMTP, else FormSubmit (no signup needed).
+export const provider = resendKey
+  ? 'resend'
+  : smtpHost && smtpUser && smtpPass
+    ? 'smtp'
+    : formsubmitTo && EMAIL_RE.test(formsubmitTo)
+      ? 'formsubmit'
+      : 'none'
 
-const defaultFrom =
-  provider === 'smtp'
-    ? smtpUser
-    : 'Subhashree Website <onboarding@resend.dev>'
+export const configured = provider !== 'none' && mailTo.length > 0
 
-const mailFrom = trim(process.env.MAIL_FROM) || defaultFrom
-
-const missingConfig = (() => {
-  if (dryRun) return null
-  if (provider === 'none') {
-    return 'No mail provider configured. Set RESEND_API_KEY, the SMTP_* variables, or FORMSUBMIT_TO.'
+export async function sendEnquiry(data) {
+  if (!configured) {
+    throw new Error(
+      'Mail is not configured. Set MAIL_TO plus RESEND_API_KEY, SMTP_* or FORMSUBMIT_TO.',
+    )
   }
-  if (!mailTo.length) {
-    return 'MAIL_TO is missing or invalid. Set the inbox that should receive enquiries.'
+
+  const { subject, html, text } = renderEnquiry(data)
+
+  if (provider === 'resend') {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: mailFrom,
+        to: mailTo,
+        subject,
+        html,
+        text,
+        reply_to: data.email,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    })
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`Resend failed (${response.status}): ${detail.slice(0, 300)}`)
+    }
+    return
   }
-  return null
-})()
 
-export const mailTransport = {
-  name: provider,
-  configured: missingConfig === null,
-  recipients: mailTo.length,
-  reason: missingConfig,
-  from: mailFrom,
-}
-
-export const recipientWarnings = rejectedRecipients.map(
-  (address) => `Ignoring invalid MAIL_TO entry: ${address}`,
-)
-
-let smtpTransporter = null
-
-function getSmtpTransporter() {
-  if (!smtpTransporter) {
-    smtpTransporter = nodemailer.createTransport({
+  if (provider === 'smtp') {
+    const transporter = nodemailer.createTransport({
       host: smtpHost,
       port: smtpPort,
-      secure: smtpSecure,
+      secure: process.env.SMTP_SECURE === 'true' || smtpPort === 465,
       auth: { user: smtpUser, pass: smtpPass },
       connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
       socketTimeout: 20_000,
     })
-  }
 
-  return smtpTransporter
-}
-
-function siteOrigin() {
-  const configured = toList(process.env.CORS_ORIGINS)[0]
-  return configured && /^https?:\/\//.test(configured)
-    ? configured.replace(/\/+$/, '')
-    : 'https://shibu-patil.github.io'
-}
-
-async function sendWithResend({ subject, html, text, replyTo }) {
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+    await transporter.sendMail({
       from: mailFrom,
       to: mailTo,
+      replyTo: data.email,
       subject,
       html,
       text,
-      reply_to: replyTo,
-    }),
-    signal: AbortSignal.timeout(20_000),
-  })
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new Error(
-      `Resend rejected the message (${response.status}): ${detail.slice(0, 300)}`,
-    )
+    })
+    return
   }
-}
 
-async function sendWithSmtp({ subject, html, text, replyTo }) {
-  await getSmtpTransporter().sendMail({
-    from: mailFrom,
-    to: mailTo,
-    replyTo,
-    subject,
-    html,
-    text,
-  })
-}
-
-async function sendWithFormSubmit({ subject, text, replyTo }, data) {
-  const origin = siteOrigin()
+  // FormSubmit: free relay, no account. First send triggers an activation
+  // email to FORMSUBMIT_TO; after that one click, everything is delivered.
+  const origin = (list(process.env.CORS_ORIGINS)[0] || 'https://shibu-patil.github.io').replace(/\/+$/, '')
   const response = await fetch(
-    `https://formsubmit.co/ajax/${encodeURIComponent(formsubmitTarget)}`,
+    `https://formsubmit.co/ajax/${encodeURIComponent(formsubmitTo)}`,
     {
       method: 'POST',
       headers: {
@@ -150,13 +107,12 @@ async function sendWithFormSubmit({ subject, text, replyTo }, data) {
         _subject: subject,
         _template: 'table',
         _captcha: 'false',
-        _replyto: replyTo,
+        _replyto: data.email,
         name: data.name,
         email: data.email,
         phone: data.phone,
         service: data.service,
         message: data.message,
-        _note: 'Sent from the Subhashree Communications website.',
       }),
       signal: AbortSignal.timeout(20_000),
     },
@@ -167,50 +123,11 @@ async function sendWithFormSubmit({ subject, text, replyTo }, data) {
   try {
     result = JSON.parse(raw)
   } catch {
-    // FormSubmit sometimes answers with plain text.
+    // plain-text answer
   }
 
-  const delivered = result.success === true || result.success === 'true'
-
-  if (!response.ok || !delivered) {
-    const detail = trim(result.message) || raw.slice(0, 300) || 'no detail'
-
-    if (/activation/i.test(detail)) {
-      throw new Error(
-        `FormSubmit is not activated yet. Open the activation email sent to ${formsubmitTarget}, click the link, then submit again.`,
-      )
-    }
-
-    throw new Error(
-      `FormSubmit rejected the message (${response.status}): ${detail}`,
-    )
+  if (!(result.success === true || result.success === 'true')) {
+    const detail = String(result.message ?? raw).slice(0, 300)
+    throw new Error(`FormSubmit failed (${response.status}): ${detail}`)
   }
-}
-
-export async function sendEnquiry(data) {
-  if (!mailTransport.configured) {
-    throw new Error(mailTransport.reason ?? 'Mail is not configured.')
-  }
-
-  const { subject, html, text } = renderEnquiry(data)
-  const payload = { subject, html, text, replyTo: data.email }
-
-  if (provider === 'dry-run') {
-    console.log(
-      `[mail:dry-run] would send "${subject}" to ${mailTo.join(', ') || '(no recipient)'}`,
-    )
-    return
-  }
-
-  if (provider === 'resend') {
-    await sendWithResend(payload)
-    return
-  }
-
-  if (provider === 'smtp') {
-    await sendWithSmtp(payload)
-    return
-  }
-
-  await sendWithFormSubmit(payload, data)
 }

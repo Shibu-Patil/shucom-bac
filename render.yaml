@@ -11,23 +11,7 @@ services:
         value: "20"
       - key: MAIL_TO
         sync: false
-      - key: MAIL_FROM
-        sync: false
       - key: CORS_ORIGINS
         value: https://shibu-patil.github.io,http://localhost:5173,http://127.0.0.1:5173
       - key: RESEND_API_KEY
         sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        value: "465"
-      - key: SMTP_SECURE
-        value: "true"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: FORMSUBMIT_TO
-        sync: false
-      - key: MAIL_DRY_RUN
-        value: "false"
