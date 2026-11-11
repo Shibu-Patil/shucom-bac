@@ -3,11 +3,16 @@ import cors from 'cors'
 import express from 'express'
 import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
-import { mailTransport, sendEnquiry } from './mailer.js'
+import {
+  mailTransport,
+  recipientWarnings,
+  sendEnquiry,
+} from './mailer.js'
 import { validateEnquiry } from './validate.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 8787
+const HOST = process.env.HOST || '0.0.0.0'
 
 const allowedOrigins = (
   process.env.CORS_ORIGINS ??
@@ -68,6 +73,7 @@ app.get('/health', (_request, response) => {
     mail: {
       provider: mailTransport.name,
       configured: mailTransport.configured,
+      recipients: mailTransport.recipients,
     },
     timestamp: new Date().toISOString(),
   })
@@ -95,6 +101,7 @@ app.post('/api/contact', contactLimiter, async (request, response) => {
 
   try {
     await sendEnquiry(data)
+    console.log(`[contact] delivered enquiry from ${data.email}`)
     response.json({ ok: true })
   } catch (error) {
     console.error('[contact] send failed:', error.message)
@@ -120,11 +127,35 @@ app.use((error, _request, response, _next) => {
   response.status(500).json({ ok: false, error: 'Unexpected server error.' })
 })
 
-app.listen(PORT, () => {
-  console.log(`shucom-api listening on port ${PORT}`)
+const server = app.listen(PORT, HOST, () => {
+  console.log(`shucom-api listening on ${HOST}:${PORT}`)
   console.log(
     `mail provider: ${mailTransport.name} (${
       mailTransport.configured ? 'configured' : 'NOT configured'
     })`,
   )
+
+  for (const warning of recipientWarnings) {
+    console.warn(`[config] ${warning}`)
+  }
+
+  if (!mailTransport.configured) {
+    console.warn(`[config] ${mailTransport.reason}`)
+    console.warn(
+      '[config] Enquiries will fail with HTTP 502 until this is fixed. See README.md.',
+    )
+  }
+})
+
+const shutdown = (signal) => {
+  console.log(`[server] ${signal} received, closing listener`)
+  server.close(() => process.exit(0))
+  setTimeout(() => process.exit(0), 10_000).unref()
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection:', reason)
 })

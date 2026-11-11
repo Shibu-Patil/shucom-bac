@@ -23,15 +23,26 @@ The API runs on `http://localhost:8787`.
 To test locally without sending real mail, add `MAIL_DRY_RUN=true` and any
 `MAIL_TO` value — submissions are logged instead of emailed.
 
-Quick check:
+Quick checks:
 
 ```bash
+npm test                      # validation unit tests
 curl http://localhost:8787/health
+```
+
+`/health` reports which provider was detected, whether it is configured, and
+how many recipient inboxes are valid:
+
+```json
+{
+  "ok": true,
+  "mail": { "provider": "resend", "configured": true, "recipients": 1 }
+}
 ```
 
 ## Email providers
 
-Use **one** of the two options.
+Set **one** provider. Detection order is: Resend → SMTP → FormSubmit.
 
 ### Option A — Resend (recommended with a domain)
 
@@ -67,6 +78,28 @@ MAIL_TO=where-enquiries-should-arrive@example.com
 For Brevo, Zoho, or another provider, use that provider's SMTP host, port, and
 credentials instead.
 
+> **Render free plan blocks outbound ports 25, 465, and 587**, so SMTP times out
+> there. Use Resend or FormSubmit on the free plan; SMTP needs a paid instance or
+> another host.
+
+### Option C — FormSubmit (no signup)
+
+Delivers through <https://formsubmit.co>, useful when you do not have a domain or
+an API key yet.
+
+```env
+MAIL_TO=where-enquiries-should-arrive@example.com
+FORMSUBMIT_TO=where-enquiries-should-arrive@example.com
+```
+
+The **first** submission makes FormSubmit send an `Activate Form` email to that
+address. Click the link once; every submission after that is delivered and
+replies go straight to the visitor. `MAIL_FROM` is ignored in this mode.
+
+If activation is still pending, `/api/contact` answers `502` and the server log
+says exactly that, so you can tell the difference between "not activated" and
+"provider down".
+
 ## Deploy on Render
 
 1. Push this folder to its own GitHub repository.
@@ -79,7 +112,19 @@ credentials instead.
 5. Deploy, then copy the service URL, for example:
    `https://shucom-api.onrender.com`
 
-The included `render.yaml` can also be used as a Blueprint.
+The included `render.yaml` can also be used as a Blueprint. It sets
+`NODE_VERSION=20`, `MAIL_DRY_RUN=false`, and marks the secrets as `sync: false`
+so Render prompts for them on first deploy.
+
+Production checklist:
+
+- [ ] `MAIL_TO` is set to the real inbox
+- [ ] exactly one provider is configured (`RESEND_API_KEY`, the SMTP trio, or
+      `FORMSUBMIT_TO`)
+- [ ] `MAIL_DRY_RUN` is **not** `true`
+- [ ] `CORS_ORIGINS` contains the exact site origin (scheme + host, no path)
+- [ ] `/health` returns `"configured": true`
+- [ ] one real submission arrives in the inbox
 
 ## Connect the website
 
@@ -144,7 +189,13 @@ Mail failure (`502`):
 
 - Never put SMTP or Resend credentials in the website build — they belong only
   in Render environment variables.
+- `MAIL_DRY_RUN=true` makes the API answer `200` while only logging the enquiry.
+  It never sends real mail, so it must stay off in production.
+- FormSubmit is a free relay: fine to start with, but move to Resend with a
+  verified domain once you have one for better deliverability and no third-party
+  dependency.
 - For best deliverability with Resend, add SPF, DKIM, and DMARC records for your
   domain.
-- Render free services sleep after inactivity; the first request after a sleep
-  can take a few seconds.
+- Render free services sleep after ~15 minutes of inactivity; the first request
+  afterwards can take 30–60 seconds. The website waits up to 75 seconds before
+  showing an error.

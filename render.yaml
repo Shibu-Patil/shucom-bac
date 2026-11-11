@@ -27,3 +27,7 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
+      - key: FORMSUBMIT_TO
+        sync: false
+      - key: MAIL_DRY_RUN
+        value: "false"
