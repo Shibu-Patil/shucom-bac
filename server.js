@@ -154,7 +154,12 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/health') {
-    json(response, 200, { ok: true, mail: MAIL_READY ? 'resend' : 'not configured' })
+    json(response, 200, {
+      ok: true,
+      mail: MAIL_READY ? 'resend' : 'not configured',
+      hasKey: Boolean(RESEND_API_KEY),
+      hasTo: Boolean(MAIL_TO),
+    })
     return
   }
 
@@ -216,4 +221,9 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`shucom-api on ${PORT} — mail: ${MAIL_READY ? 'resend' : 'NOT configured'}`)
+  if (!MAIL_READY) {
+    console.log(
+      `[config] RESEND_API_KEY: ${RESEND_API_KEY ? 'set' : 'MISSING'} | MAIL_TO: ${MAIL_TO || 'MISSING'}`,
+    )
+  }
 })
