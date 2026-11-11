@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: shucom-api
+    name: shucom-bac
     runtime: node
     plan: free
     buildCommand: npm ci
@@ -13,5 +13,3 @@ services:
         sync: false
       - key: CORS_ORIGINS
         value: https://shibu-patil.github.io,http://localhost:5173,http://127.0.0.1:5173
-      - key: RESEND_API_KEY
-        sync: false
