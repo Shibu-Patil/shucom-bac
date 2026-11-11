@@ -159,18 +159,28 @@ const enquiryText = (data) =>
 const sendEnquiry = (data) =>
   RESEND_API_KEY ? sendWithResend(data) : sendWithFormSubmit(data)
 
-// Simple in-memory rate limit: 5 submissions per IP per 15 minutes.
+// Simple in-memory rate limit: 10 submissions per IP per 15 minutes.
+const RATE_LIMIT = 10
+const RATE_WINDOW_MS = 15 * 60 * 1000
+
 const hits = new Map()
 const limited = (ip) => {
   const now = Date.now()
-  const entry = hits.get(ip) ?? { count: 0, reset: now + 900_000 }
+
+  if (hits.size > 5_000) {
+    for (const [key, entry] of hits) {
+      if (now > entry.reset) hits.delete(key)
+    }
+  }
+
+  const entry = hits.get(ip) ?? { count: 0, reset: now + RATE_WINDOW_MS }
   if (now > entry.reset) {
     entry.count = 0
-    entry.reset = now + 900_000
+    entry.reset = now + RATE_WINDOW_MS
   }
   entry.count += 1
   hits.set(ip, entry)
-  return entry.count > 5
+  return entry.count > RATE_LIMIT
 }
 
 const server = createServer(async (request, response) => {
