@@ -1,28 +1,30 @@
 # shucom-api
 
-One file, no dependencies: receives the website form and emails it to `MAIL_TO`.
+One file, no dependencies. Receives the website form and emails it to `MAIL_TO`
+using Resend.
 
 - `POST /api/contact` — send the enquiry
-- `GET /health` — shows the mail provider
+- `GET /health` — `{"ok":true,"mail":"resend"}` when ready
 
-## Run
+## Setup
 
-```bash
-cp .env.example .env   # set MAIL_TO
-npm start
+1. Create a free account at <https://resend.com> using the same address as
+   `MAIL_TO`.
+2. Copy the API key.
+3. Set both on Render (Environment):
+
+```env
+MAIL_TO=your-inbox@example.com
+RESEND_API_KEY=re_...
 ```
 
-Runs on `http://localhost:8787`.
+That is all. No domain needed while `MAIL_FROM` is empty and the recipient is
+your Resend account address. With a verified domain, also set
+`MAIL_FROM="Subhashree Website <hello@yourdomain.com>"`.
 
-## Sending
+## Run locally
 
-By default it uses [FormSubmit](https://formsubmit.co), which needs no account.
-The first message sends an `Activate Form` email to `MAIL_TO`; click that link
-once and every enquiry after it lands in the inbox, with replies going to the
-visitor.
-
-If you add a `RESEND_API_KEY`, it uses Resend instead.
-
-## Deploy on Render
-
-New → Blueprint → pick this repo. Set `MAIL_TO` when prompted. Nothing else.
+```bash
+cp .env.example .env   # fill MAIL_TO and RESEND_API_KEY
+npm start
+```

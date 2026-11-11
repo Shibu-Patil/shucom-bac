@@ -15,6 +15,9 @@ if (existsSync(envFile)) {
 const PORT = Number(process.env.PORT) || 8787
 const MAIL_TO = (process.env.MAIL_TO ?? '').trim()
 const RESEND_API_KEY = (process.env.RESEND_API_KEY ?? '').trim()
+const MAIL_FROM =
+  (process.env.MAIL_FROM ?? '').trim() ||
+  'Subhashree Website <onboarding@resend.dev>'
 
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGINS ??
@@ -24,9 +27,8 @@ const ALLOWED_ORIGINS = (
   .map((origin) => origin.trim())
   .filter(Boolean)
 
-const SITE_ORIGIN = (ALLOWED_ORIGINS[0] ?? 'https://shibu-patil.github.io').replace(/\/+$/, '')
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
-const MAIL_PROVIDER = RESEND_API_KEY ? 'resend' : MAIL_TO ? 'formsubmit' : 'none'
+const MAIL_READY = Boolean(RESEND_API_KEY && MAIL_TO)
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -59,7 +61,6 @@ const validate = (body) => {
     phone: clean(body.phone),
     service: clean(body.service) || 'Not specified',
     message: clean(body.message),
-    company: clean(body.company),
   }
 
   if (data.name.length < 2) return { error: 'Please enter your name.' }
@@ -73,7 +74,7 @@ const validate = (body) => {
   return { data }
 }
 
-const sendWithResend = async (data) => {
+const sendEmail = async (data) => {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -81,11 +82,21 @@ const sendWithResend = async (data) => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: process.env.MAIL_FROM || 'Subhashree Website <onboarding@resend.dev>',
+      from: MAIL_FROM,
       to: [MAIL_TO],
       reply_to: data.email,
       subject: `New website enquiry — ${data.service} — ${data.name}`,
-      text: enquiryText(data),
+      text: [
+        'NEW WEBSITE ENQUIRY',
+        '',
+        `Name: ${data.name}`,
+        `Email: ${data.email}`,
+        `Phone: ${data.phone}`,
+        `Service: ${data.service}`,
+        '',
+        'Message:',
+        data.message,
+      ].join('\n'),
     }),
     signal: AbortSignal.timeout(20_000),
   })
@@ -95,69 +106,6 @@ const sendWithResend = async (data) => {
     throw new Error(`Resend failed (${response.status}): ${detail.slice(0, 200)}`)
   }
 }
-
-const sendWithFormSubmit = async (data) => {
-  const response = await fetch(
-    `https://formsubmit.co/ajax/${encodeURIComponent(MAIL_TO)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Origin: SITE_ORIGIN,
-        Referer: `${SITE_ORIGIN}/`,
-      },
-      body: JSON.stringify({
-        _subject: `New website enquiry — ${data.service} — ${data.name}`,
-        _template: 'table',
-        _captcha: 'false',
-        _replyto: data.email,
-        Name: data.name,
-        Email: data.email,
-        Phone: data.phone,
-        Service: data.service,
-        Message: data.message,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    },
-  )
-
-  const raw = await response.text().catch(() => '')
-  let result = {}
-  try {
-    result = JSON.parse(raw)
-  } catch {
-    // FormSubmit sometimes replies with plain text.
-  }
-
-  const ok = result.success === true || result.success === 'true'
-
-  if (!ok) {
-    const detail = String(result.message ?? raw).slice(0, 200)
-    if (/activation/i.test(detail)) {
-      throw new Error(
-        `FormSubmit needs one-time activation. Open the activation email sent to ${MAIL_TO} and click the link.`,
-      )
-    }
-    throw new Error(`FormSubmit failed (${response.status}): ${detail}`)
-  }
-}
-
-const enquiryText = (data) =>
-  [
-    'NEW WEBSITE ENQUIRY',
-    '',
-    `Name: ${data.name}`,
-    `Email: ${data.email}`,
-    `Phone: ${data.phone}`,
-    `Service: ${data.service}`,
-    '',
-    'Message:',
-    data.message,
-  ].join('\n')
-
-const sendEnquiry = (data) =>
-  RESEND_API_KEY ? sendWithResend(data) : sendWithFormSubmit(data)
 
 // Simple in-memory rate limit: 10 submissions per IP per 15 minutes.
 const RATE_LIMIT = 10
@@ -185,7 +133,10 @@ const limited = (ip) => {
 
 const server = createServer(async (request, response) => {
   const origin = request.headers.origin
-  const allowed = !origin || ALLOWED_ORIGINS.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+  const allowed =
+    !origin ||
+    ALLOWED_ORIGINS.includes(origin) ||
+    /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
 
   if (origin && allowed) {
     response.setHeader('Access-Control-Allow-Origin', origin)
@@ -203,7 +154,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/health') {
-    json(response, 200, { ok: true, mail: MAIL_PROVIDER })
+    json(response, 200, { ok: true, mail: MAIL_READY ? 'resend' : 'not configured' })
     return
   }
 
@@ -217,7 +168,9 @@ const server = createServer(async (request, response) => {
     return
   }
 
-  const ip = String(request.headers['x-forwarded-for'] ?? request.socket.remoteAddress ?? '').split(',')[0].trim()
+  const ip = String(request.headers['x-forwarded-for'] ?? request.socket.remoteAddress ?? '')
+    .split(',')[0]
+    .trim()
 
   if (limited(ip)) {
     json(response, 429, { ok: false, error: 'Too many messages. Please try again later.' })
@@ -245,14 +198,14 @@ const server = createServer(async (request, response) => {
     return
   }
 
-  if (MAIL_PROVIDER === 'none') {
-    console.error('[contact] MAIL_TO is not set')
-    json(response, 500, { ok: false, error: 'Mail is not configured.' })
+  if (!MAIL_READY) {
+    console.error('[contact] RESEND_API_KEY or MAIL_TO is missing')
+    json(response, 503, { ok: false, error: 'Mail is not configured yet.' })
     return
   }
 
   try {
-    await sendEnquiry(data)
+    await sendEmail(data)
     console.log(`[contact] sent enquiry from ${data.email}`)
     json(response, 200, { ok: true })
   } catch (sendError) {
@@ -262,5 +215,5 @@ const server = createServer(async (request, response) => {
 })
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`shucom-api on ${PORT} — mail: ${MAIL_PROVIDER}`)
+  console.log(`shucom-api on ${PORT} — mail: ${MAIL_READY ? 'resend' : 'NOT configured'}`)
 })

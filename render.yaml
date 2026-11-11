@@ -11,5 +11,7 @@ services:
         value: "20"
       - key: MAIL_TO
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: CORS_ORIGINS
         value: https://shibu-patil.github.io,http://localhost:5173,http://127.0.0.1:5173
