@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer'
+const nodemailer = require('nodemailer')
 
 const MAIL_TO = (process.env.MAIL_TO ?? '').trim()
 const SMTP_HOST = (process.env.SMTP_HOST ?? 'smtp.gmail.com').trim()
@@ -116,7 +116,7 @@ const limited = (ip) => {
   return entry.count > RATE_LIMIT
 }
 
-export const health = (request, response) => {
+const health = (response) => {
   json(response, 200, {
     ok: true,
     mail: MAIL_READY ? 'smtp' : 'not configured',
@@ -126,7 +126,7 @@ export const health = (request, response) => {
   })
 }
 
-export const contact = async (request, response) => {
+const contact = async (request, response) => {
   const origin = request.headers.origin
   const allowed =
     !origin ||
@@ -201,5 +201,22 @@ export const contact = async (request, response) => {
   } catch (sendError) {
     console.error('[contact] failed:', sendError.message)
     json(response, 502, { ok: false, error: 'Message could not be sent. Please email us directly.' })
+  }
+}
+
+// One entrypoint: GET -> health, POST/OPTIONS -> contact.
+module.exports = async (request, response) => {
+  try {
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      health(response)
+      return
+    }
+
+    await contact(request, response)
+  } catch (error) {
+    console.error('[function] crashed:', error)
+    if (!response.headersSent) {
+      json(response, 500, { ok: false, error: 'Unexpected error.' })
+    }
   }
 }
