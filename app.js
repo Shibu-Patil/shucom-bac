@@ -1,16 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
 import nodemailer from 'nodemailer'
-
-// Tiny .env loader for local runs. On Vercel the real env vars are used.
-const envFile = new URL('./.env', import.meta.url)
-if (existsSync(envFile)) {
-  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
-    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
-    if (match && !process.env[match[1]]) {
-      process.env[match[1]] = match[2].replace(/^["']|["']$/g, '')
-    }
-  }
-}
 
 const MAIL_TO = (process.env.MAIL_TO ?? '').trim()
 const SMTP_HOST = (process.env.SMTP_HOST ?? 'smtp.gmail.com').trim()

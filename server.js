@@ -1,5 +1,19 @@
 import { createServer } from 'node:http'
-import { contact, health } from './app.js'
+import { existsSync, readFileSync } from 'node:fs'
+
+// Local .env support. On Vercel the real env vars are injected.
+const envFile = new URL('./.env', import.meta.url)
+if (existsSync(envFile)) {
+  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (match && !process.env[match[1]]) {
+      process.env[match[1]] = match[2].replace(/^["']|["']$/g, '')
+    }
+  }
+}
+
+// Imported after .env is loaded.
+const { contact, health } = await import('./app.js')
 
 const PORT = Number(process.env.PORT) || 8787
 
