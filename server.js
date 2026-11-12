@@ -1,7 +1,8 @@
 import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
+import nodemailer from 'nodemailer'
 
-// Tiny .env loader for local runs. On Render the real env vars are used.
+// Tiny .env loader for local runs. On the host the real env vars are used.
 const envFile = new URL('./.env', import.meta.url)
 if (existsSync(envFile)) {
   for (const line of readFileSync(envFile, 'utf8').split('\n')) {
@@ -14,10 +15,14 @@ if (existsSync(envFile)) {
 
 const PORT = Number(process.env.PORT) || 8787
 const MAIL_TO = (process.env.MAIL_TO ?? '').trim()
-const RESEND_API_KEY = (process.env.RESEND_API_KEY ?? '').trim()
-const MAIL_FROM =
-  (process.env.MAIL_FROM ?? '').trim() ||
-  'Subhashree Website <onboarding@resend.dev>'
+
+// Defaults to Gmail. Any SMTP host works via the SMTP_* variables.
+const SMTP_HOST = (process.env.SMTP_HOST ?? 'smtp.gmail.com').trim()
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 465
+const SMTP_USER = (process.env.SMTP_USER ?? '').trim()
+const SMTP_PASS = (process.env.SMTP_PASS ?? '').replace(/\s+/g, '')
+
+const MAIL_READY = Boolean(SMTP_USER && SMTP_PASS && MAIL_TO)
 
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGINS ??
@@ -28,7 +33,6 @@ const ALLOWED_ORIGINS = (
   .filter(Boolean)
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
-const MAIL_READY = Boolean(RESEND_API_KEY && MAIL_TO)
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -74,38 +78,34 @@ const validate = (body) => {
   return { data }
 }
 
-const sendEmail = async (data) => {
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: MAIL_FROM,
-      to: [MAIL_TO],
-      reply_to: data.email,
-      subject: `New website enquiry — ${data.service} — ${data.name}`,
-      text: [
-        'NEW WEBSITE ENQUIRY',
-        '',
-        `Name: ${data.name}`,
-        `Email: ${data.email}`,
-        `Phone: ${data.phone}`,
-        `Service: ${data.service}`,
-        '',
-        'Message:',
-        data.message,
-      ].join('\n'),
-    }),
-    signal: AbortSignal.timeout(20_000),
-  })
+const transporter = nodemailer.createTransport({
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_PORT === 465,
+  auth: { user: SMTP_USER, pass: SMTP_PASS },
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 20_000,
+})
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new Error(`Resend failed (${response.status}): ${detail.slice(0, 200)}`)
-  }
-}
+const sendEmail = (data) =>
+  transporter.sendMail({
+    from: `Subhashree Website <${SMTP_USER}>`,
+    to: MAIL_TO,
+    replyTo: data.email,
+    subject: `New website enquiry — ${data.service} — ${data.name}`,
+    text: [
+      'NEW WEBSITE ENQUIRY',
+      '',
+      `Name: ${data.name}`,
+      `Email: ${data.email}`,
+      `Phone: ${data.phone}`,
+      `Service: ${data.service}`,
+      '',
+      'Message:',
+      data.message,
+    ].join('\n'),
+  })
 
 // Simple in-memory rate limit: 10 submissions per IP per 15 minutes.
 const RATE_LIMIT = 10
@@ -156,8 +156,9 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') {
     json(response, 200, {
       ok: true,
-      mail: MAIL_READY ? 'resend' : 'not configured',
-      hasKey: Boolean(RESEND_API_KEY),
+      mail: MAIL_READY ? 'smtp' : 'not configured',
+      hasUser: Boolean(SMTP_USER),
+      hasPass: Boolean(SMTP_PASS),
       hasTo: Boolean(MAIL_TO),
     })
     return
@@ -204,7 +205,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (!MAIL_READY) {
-    console.error('[contact] RESEND_API_KEY or MAIL_TO is missing')
+    console.error('[contact] SMTP_USER, SMTP_PASS or MAIL_TO is missing')
     json(response, 503, { ok: false, error: 'Mail is not configured yet.' })
     return
   }
@@ -220,10 +221,10 @@ const server = createServer(async (request, response) => {
 })
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`shucom-api on ${PORT} — mail: ${MAIL_READY ? 'resend' : 'NOT configured'}`)
+  console.log(`shucom-api on ${PORT} — mail: ${MAIL_READY ? 'smtp' : 'NOT configured'}`)
   if (!MAIL_READY) {
     console.log(
-      `[config] RESEND_API_KEY: ${RESEND_API_KEY ? 'set' : 'MISSING'} | MAIL_TO: ${MAIL_TO || 'MISSING'}`,
+      `[config] SMTP_USER: ${SMTP_USER ? 'set' : 'MISSING'} | SMTP_PASS: ${SMTP_PASS ? 'set' : 'MISSING'} | MAIL_TO: ${MAIL_TO || 'MISSING'}`,
     )
   }
 })
