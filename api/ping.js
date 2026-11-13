@@ -1,4 +1,4 @@
-module.exports = (request, response) => {
+export default function handler(request, response) {
   response.writeHead(200, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',

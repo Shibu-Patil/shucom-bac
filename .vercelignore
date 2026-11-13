@@ -1,0 +1,8 @@
+# Local-only files — must not be uploaded, or Vercel treats server.mjs
+# as the whole app entrypoint instead of the api/ functions.
+dev-server.mjs
+DEPLOY-VPS.md
+render.yaml
+.env
+.env.*
+*.log

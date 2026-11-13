@@ -1,4 +1,4 @@
-const nodemailer = require('nodemailer')
+import nodemailer from 'nodemailer'
 
 const MAIL_TO = (process.env.MAIL_TO ?? '').trim()
 const SMTP_HOST = (process.env.SMTP_HOST ?? 'smtp.gmail.com').trim()
@@ -205,7 +205,7 @@ const contact = async (request, response) => {
 }
 
 // One entrypoint: GET -> health, POST/OPTIONS -> contact.
-module.exports = async (request, response) => {
+export default async function handler(request, response) {
   try {
     if (request.method === 'GET' || request.method === 'HEAD') {
       health(response)

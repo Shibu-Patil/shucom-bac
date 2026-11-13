@@ -1,6 +1,5 @@
 import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 
 // Local .env support. On Vercel the real env vars are injected.
 const envFile = new URL('./.env', import.meta.url)
@@ -13,8 +12,7 @@ if (existsSync(envFile)) {
   }
 }
 
-const require = createRequire(import.meta.url)
-const handler = require('./api/index.js')
+const { default: handler } = await import('./api/index.js')
 
 const PORT = Number(process.env.PORT) || 8787
 

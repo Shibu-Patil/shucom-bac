@@ -2,13 +2,14 @@
   "name": "shucom-api",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Contact form server for Subhashree Communications",
   "engines": {
     "node": "22.x"
   },
   "scripts": {
-    "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "start": "node dev-server.mjs",
+    "dev": "node --watch dev-server.mjs"
   },
   "dependencies": {
     "nodemailer": "^10.5.0"
